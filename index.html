@@ -62,6 +62,12 @@
   .body p.in{opacity:1;transform:none}
   .end{margin-top:2.6rem;padding-top:1.05rem;border-top:1px solid var(--read-line);
        font-size:.73rem;letter-spacing:.11em;color:var(--quietink);padding-bottom:2.6rem}
+  .more{padding-bottom:3rem}
+  .onemore{margin-top:1.4rem;background:none;border:1px solid var(--read-line);border-radius:999px;
+           padding:.62rem 1.5rem;font:inherit;font-size:.82rem;letter-spacing:.04em;
+           color:var(--quietink);cursor:pointer;transition:background 160ms ease,opacity 160ms ease}
+  .onemore:active{background:#f2ede3}
+  .more .locked{padding:.75rem 0 0}
   .locked{padding:1.6rem 0 3rem;font-size:.8rem;line-height:1.9;color:var(--read-t3)}
 
   /* 右边缘竖向进度 */
@@ -294,6 +300,7 @@ const SIZES={s:".94rem",m:"1.02rem",l:"1.13rem"};
 
 let state=store.read();
 if(!state.turned) state={turned:[],star:[],day:null,size:"m"};
+state.extra=state.extra||null;   // {date, used:bool}
 state.star=state.star||[]; state.size=state.size||"m"; state.day=state.day||null;
 
 /* ── 每天抽一篇，抽完锁死 ── */
@@ -301,11 +308,28 @@ function drawToday(){
   const d=today();
   if(state.day&&state.day.date===d) return;
   const pool=ENTRIES.filter(e=>!state.turned.some(t=>t.id===e.id));
-  if(!pool.length){ state.day={date:d,id:null}; store.write(state); return }
+  if(!pool.length){ state.day={date:d,id:null}; state.extra={date:d,used:false}; store.write(state); return }
   const pick=pool[Math.floor(Math.random()*pool.length)];
   state.turned.push({id:pick.id,on:d});
   state.day={date:d,id:pick.id};
+  state.extra={date:d,used:false};        // 每天一次额外，不累积
   store.write(state);
+}
+
+/* 额外那一次：按了当天再抽一篇 */
+function extraLeft(){
+  const d=today();
+  if(!state.extra||state.extra.date!==d){ state.extra={date:d,used:false}; store.write(state) }
+  return !state.extra.used && ENTRIES.some(e=>!state.turned.some(t=>t.id===e.id));
+}
+function drawExtra(){
+  if(!extraLeft()) return null;
+  const pool=ENTRIES.filter(e=>!state.turned.some(t=>t.id===e.id));
+  const pick=pool[Math.floor(Math.random()*pool.length)];
+  state.turned.push({id:pick.id,on:today()});
+  state.extra={date:today(),used:true};
+  store.write(state);
+  return state.turned.length-1;
 }
 drawToday(); store.write(state);
 document.documentElement.style.setProperty("--fs",SIZES[state.size]);
@@ -344,7 +368,12 @@ function vToday(n){
     <h1>${esc(e.title)}</h1>
     <div class="body">${e.body.map(p=>`<p>${esc(p)}</p>`).join("")}</div>
     <div class="end">${esc(e.by)}</div>
-    ${isToday?`<p class="locked">${left>0?`今天就这一篇。还有 ${left} 篇没到，明天再来。`:"这是最后一篇了。等有人再往上写。"}</p>`:""}
+    ${isToday?`<div class="more">${
+        left<=0 ? `<p class="locked">翻完了。等有人再往上写。</p>`
+      : extraLeft() ? `<button class="onemore" data-act="more">再翻一篇</button>
+                       <p class="locked">今天还剩这一次。不按就留着，明天重置。</p>`
+      : `<p class="locked">今天的两篇都翻完了。还有 ${left} 篇没到，明天再来。</p>`
+    }</div>`:""}
   </article>`;
 }
 
@@ -506,7 +535,7 @@ function replaceAll(d){
   ENTRIES=d.entries.slice();
   state={turned:(d.turned||[]).filter(t=>ENTRIES.some(e=>e.id===t.id)),
          star:(d.star||[]).filter(id=>ENTRIES.some(e=>e.id===id)),
-         day:null,size:state.size};
+         day:null,size:state.size,extra:null};
   store.write(state); drawToday(); store.write(state);
   sheet=null; q=""; only=false; view={tab:"index",i:startAt()}; paint({tab:"index"});
 }
@@ -525,6 +554,7 @@ rbarEl.addEventListener("click",ev=>{
 stageEl.addEventListener("click",ev=>{
   const b=ev.target.closest("button"); if(!b||b.disabled) return;
   if(b.dataset.act==="star") return toggleStar();
+  if(b.dataset.act==="more"){ const n=drawExtra(); return n===null?draw():paint({tab:"today",i:n},"l") }
   if(b.dataset.open!==undefined) return paint({tab:"today",i:+b.dataset.open});
   if(b.dataset.act==="clr"){q="";return draw()}
   if(b.dataset.only!==undefined){only=b.dataset.only==="1";return draw()}
@@ -544,7 +574,7 @@ stageEl.addEventListener("click",ev=>{
       sheet="add"; draw(); document.getElementById("ta").focus(); return;
     case "reset":
       if(!confirm("清空本机的翻到记录和收藏？内容本身不动。")) return;
-      state={turned:[],star:[],day:null,size:state.size};
+      state={turned:[],star:[],day:null,size:state.size,extra:null};
       store.write(state); drawToday(); store.write(state);
       view={tab:"today",i:startAt()}; return paint({tab:"today",i:startAt()});
   }
